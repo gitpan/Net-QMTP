@@ -25,7 +25,7 @@ my $i;
 # test 2; object creation
 #
 my $qmtp = Net::QMTP->new('server.example.org', 
-				ManualConnect	=> 0,
+				DeferConnect	=> 1,
 			);
 if ($qmtp and ref($qmtp) eq "Net::QMTP") {
 	print "ok 2\n";
@@ -37,7 +37,7 @@ if ($qmtp and ref($qmtp) eq "Net::QMTP") {
 #
 # test 3; check server
 #
-$i = $qmtp->host();
+$i = $qmtp->server();
 
 if ($i and $i eq "server.example.org") {
 	print "ok 3\n";

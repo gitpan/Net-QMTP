@@ -13,7 +13,7 @@ use Carp;
 # Please submit bug reports, patches and comments to the author.
 # Latest information at http://romana.now.ie/#net-qmtp
 #
-# $Id: QMTP.pm,v 1.8 2003/01/28 19:11:44 james Exp $
+# $Id: QMTP.pm,v 1.15 2003/01/30 19:53:43 james Exp $
 #
 # This module is an object interface to the Quick Mail Transfer Protocol
 # (QMTP). QMTP is a replacement for the Simple Mail Transfer Protocol
@@ -26,12 +26,12 @@ use Carp;
 #
 
 use vars qw($VERSION);
-$VERSION = "0.02";
+$VERSION = "0.04";
 
 sub new {
 	my $proto = shift or croak;
 	my $class = ref($proto) || $proto;
-	my $host = shift or croak "No host specified in constructor";
+	my $server = shift or croak "No server specified in constructor";
 	my %args;
 
 	%args = @_ if @_;
@@ -42,19 +42,38 @@ sub new {
 		MSGFILE		=> undef,
 		ENCODING	=> undef,
 		SOCKET		=> undef,
-		HOST		=> undef,
+		SERVER		=> undef,
+		PORT		=> 209,
 		DEBUG		=> undef,
+		TIMEOUT		=> undef,	# use IO::Socket default
+		CONNECTTIME	=> undef,
+		SESSIONLIMIT	=> 3600,	# 1 hour
 	};
-	$self->{DEBUG} = 1 if $args{'Debug'};
-	$self->{HOST} = $host or croak "Constructor host() failed";
+	if ($args{'Debug'}) {
+		$self->{DEBUG} = 1;
+		warn "debugging on; Version: $VERSION; RCS " .
+			qq$Revision: 1.15 $ . "\n";
+	}
+	$self->{SERVER} = $server or croak "Constructor server failed";
+	warn "server set to '$server'\n" if $self->{DEBUG};
 	bless($self, $class);
 	unless ($self->encoding("__GUESS__")) {
 		carp "Constructor encoding() failed";
 		return undef;
 	}
-	if ($args{'ManualConnect'}) {
+	if ($args{'ConnectTimeout'}) {
+		$self->{TIMEOUT} = $args{'ConnectTimeout'};
+		warn "timeout ".$self->{TIMEOUT}."\n" if $self->{DEBUG};
+	}
+	if ($args{'Port'}) {
+		$self->{PORT} = $args{'Port'};
+		warn "port set to ".$self->{PORT}."\n" if $self->{DEBUG};
+	}
+	unless ($args{'DeferConnect'}) {
+		warn "calling reconnect()\n" if $self->{DEBUG};
 		$self->reconnect() or return undef;
 	}
+	warn "constructor finished\n" if $self->{DEBUG};
 	return $self;
 }
 
@@ -62,14 +81,37 @@ sub reconnect {
 	my $self = shift;
 	ref($self) or croak;
 
-	# can't reconnect if connected
-	return undef if $self->{SOCKET};
-	my $sock = IO::Socket::INET->new(
-			PeerAddr	=> $self->{HOST},
-			PeerPort	=> 'qmtp(209)',
-			Proto		=> 'tcp') or return undef;
-	$sock->autoflush();
+	my $sock = $self->{SOCKET};
+
+	# if have a socket, disconnect first
+	if (defined($sock)) {
+		#carp "Socket is already defined";
+		#return undef;
+		$self->disconnect() or return undef;
+	}
+
+	# Applying timeout() to socket seems to fail. Hmm.
+	warn "opening socket to " . $self->{SERVER} . "\n" if $self->{DEBUG};
+	if ($self->{TIMEOUT}) {
+		warn "socket timeout ".$self->{TIMEOUT}."\n" if $self->{DEBUG};
+		$sock = IO::Socket::INET->new(
+				PeerAddr	=> $self->{SERVER},
+				PeerPort	=> $self->{PORT},
+				Timeout		=> $self->{TIMEOUT},
+				Proto		=> 'tcp') or return undef;
+	} else {
+		warn "socket default timeout\n" if $self->{DEBUG};
+		$sock = IO::Socket::INET->new(
+				PeerAddr	=> $self->{SERVER},
+				PeerPort	=> $self->{PORT},
+				Proto		=> 'tcp') or return undef;
+	}
+
 	$self->{SOCKET} = $sock;
+	$sock->autoflush();
+	warn "socket opened to " . $sock->peerhost() . "\n" if $self->{DEBUG};
+	$self->{CONNECTTIME} = time;
+	warn "connected at " . $self->{CONNECTTIME} . "\n" if $self->{DEBUG};
 	return $self->{SOCKET};
 }
 
@@ -77,13 +119,32 @@ sub disconnect {
 	my $self = shift;
 	ref($self) or croak;
 
-	# can't disconnect if not connected
-	my $sock = $self->{SOCKET} or return undef;
+	my $sock = $self->{SOCKET};
+
+	# can't disconnect if no socket
+	if (!defined($sock)) {
+		carp "Socket is not defined";
+		return undef;
+	}
+
+	##
+	## Only on newer perls
+	##
+	### can't disconnect if not connected
+	##if (!$sock->connected()) {
+	##	carp "Socket is not connected";
+	##	$self->{SOCKET} = undef;
+	##	return undef;
+	##}
+
+	warn "closing socket to " . $sock->peerhost() . "\n" if $self->{DEBUG};
 	unless (close $sock) {
 		carp "Cannot close socket: $!";
 		return undef;
 	}
 	$self->{SOCKET} = undef;
+	warn "socket closed (was open for " . (time - $self->{CONNECTTIME}) .
+				"s)\n" if $self->{DEBUG};
 	return 1;
 }
 
@@ -94,36 +155,43 @@ sub encoding {
 
 	# guess from input record seperator
 	if ($e eq "__GUESS__") {
-
+		warn "guessing encoding\n" if $self->{DEBUG};
 		if ($/ eq "\015\012") {		# CRLF: Dos/Win
 			$self->{ENCODING} = "\015";
+			warn "guessed carraige-return encoding\n" if $self->{DEBUG};
 		} else {			# LF: Unix-like
 			$self->{ENCODING} = "\012";
+			warn "guessed line-feed encoding\n" if $self->{DEBUG};
 		}
 
 	# specific encoding requested
 	} elsif ($e eq "dos") {
 		$self->{ENCODING} = "\015";
+		warn "set carraige-return encoding\n" if $self->{DEBUG};
 	} elsif ($e eq "unix") {
 		$self->{ENCODING} = "\012";
+		warn "set line-feed encoding\n" if $self->{DEBUG};
 	} else {
 		croak "Unknown encoding: '$e'";
+		$self->{ENCODING} = undef;	
 	}
 
 	return $self->{ENCODING};
 }
 
-sub host {
+sub server {
 	my $self = shift;
 	ref($self) or croak;
-	$self->{HOST} = shift if @_;
-	return $self->{HOST};
+	$self->{SERVER} = shift if @_;
+	warn "server is " . $self->{SERVER} . "\n" if $self->{DEBUG};
+	return $self->{SERVER};
 }
 
 sub sender {
 	my $self = shift;
 	ref($self) or croak;
 	$self->{SENDER} = shift if @_;
+	warn "sender is " . $self->{SENDER} . "\n" if $self->{DEBUG};
 	return $self->{SENDER};
 }
 
@@ -131,29 +199,40 @@ sub recipient {
 	my $self = shift;
 	ref($self) or croak;
 	push(@{$self->{RECIPIENTS}}, shift) if @_;
+	warn "recipients are ". join(",", @{$self->{RECIPIENTS}}) .
+			"\n" if $self->{DEBUG};
 	return $self->{RECIPIENTS};
 }
 
 sub message {
 	my $self = shift;
 	ref($self) or croak;
+	warn "message() started\n" if $self->{DEBUG};
 	if ($self->{MSGFILE}) {
 		carp "Message already created by message_from_file()";
 		return undef;
 	}
 	$self->{MESSAGE} .= shift if @_;
+	warn "message text appended (is now " . length($self->{MESSAGE}) .
+				" bytes)\n" if $self->{DEBUG};
 	return $self->{MESSAGE};
 }
 
 sub message_from_file {
 	my $self = shift;
 	ref($self) or croak;
-	if ($self->{MESSAGE}) {
+	warn "message_from_file() started\n" if $self->{DEBUG};
+	if (defined($self->{MESSAGE})) {
 		carp "Message already created by message()";
 		return undef;
 	}
 	my $f = shift or return $self->{MSGFILE};
-	-s $f or return undef;
+	#
+	# This is permitted in case the file needs to be created/modified
+	# by some subsequent process
+	## -f $f or return undef;
+	#
+	warn "message_from_file file is '$f'\n" if $self->{DEBUG};
 	$self->{MSGFILE} = $f;
 	return $self->{MSGFILE};
 }
@@ -164,6 +243,7 @@ sub new_message {
 
 	$self->{MESSAGE} = undef;
 	$self->{MSGFILE} = undef;
+	warn "message reset\n" if $self->{DEBUG};
 	return 1;
 }
 
@@ -173,6 +253,7 @@ sub new_envelope {
 
 	$self->{SENDER} = undef;
 	$self->{RECIPIENTS} = [];
+	warn "envelope reset\n" if $self->{DEBUG};
 	return 1;
 }
 
@@ -182,22 +263,32 @@ sub _send_file {
 	my $f = $self->{MSGFILE};
 	my $sock = $self->{SOCKET};
 
+	warn "_send_file starting\n" if $self->{DEBUG};
 	unless (open(FILE, $f)) {
 		carp "Cannot open file '$f': $!";
 		return undef;
 	}
-	my $size = -s $f;
-	carp "File '$f' is empty" if $size == 0;
-	return undef if $size < 0;
+	my $size = (stat(FILE))[7];
+	#carp "File '$f' is empty" if $size == 0;
+	if ($size < 0) {
+		carp "File '$f' has negative size";
+		return undef;
+	}
 
+	my $len;
 	print $sock ($size+1) . ":" . $self->{ENCODING} or return undef;
-	# count len as we read?
-	while (<FILE>) { print $sock or return undef };
+	while (<FILE>) { print $sock $_ or return undef; $len += length($_) };
+
+	if ($size != $len) {
+		warn "File '$f' should be $size but we read $len\n";
+		return undef;
+	}
 	print $sock "," or return undef;
 	unless (close FILE) {
 		carp "Cannot close file '$f': $!";
 		return undef;
 	}
+	warn "_send_file finished\n" if $self->{DEBUG};
 	return 1;
 }
 
@@ -205,30 +296,44 @@ sub send {
 	my $self = shift;
 	ref($self) or croak;
 
+	warn "send() running sanity checks\n" if $self->{DEBUG};
 	$self->_ready_to_send() or return undef;
+	##$self->_session_notexpired() or return undef;
 	my $sock = $self->{SOCKET};
 
 	if ($self->{MSGFILE}) {
+		warn "calling _send_file for " . $self->{MSGFILE} .
+				"\n" if $self->{DEBUG};
 		$self->_send_file() or return undef;
 	} else {
+		warn "sending message body\n" if $self->{DEBUG};
 		print $sock &_as_netstring($self->{ENCODING} .
 			$self->{MESSAGE}) or return undef;
 	}
 
+	warn "sending envelope sender " .
+		&_as_netstring($self->{SENDER}) . "\n" if $self->{DEBUG};
 	print $sock &_as_netstring($self->{SENDER}) or return undef;
+
+	warn "sending envelope recipient(s) " .
+		&_list_as_netstring($self->{RECIPIENTS})."\n" if $self->{DEBUG};
 	print $sock &_list_as_netstring($self->{RECIPIENTS}) or return undef;
 
 	my($s, %r);
 	foreach (@{$self->{RECIPIENTS}}) {
+		warn "read response\n" if $self->{DEBUG};
 		$s = $self->_read_netstring();
+		warn "parse response: $s\n" if $self->{DEBUG};
 		CASE: {
 			$s =~ s/^K/success: / and last CASE;
 			$s =~ s/^Z/deferral: / and last CASE;
 			$s =~ s/^D/failure: / and last CASE;
+			_badproto();
 		}
 		$r{$_} = $s;
 	}
 
+	warn "finished send()\n" if $self->{DEBUG};
 	return \%r;
 }
 
@@ -236,20 +341,37 @@ sub _ready_to_send {
 	my $self = shift;
 	ref($self) or die;
 
-	# need defined sender (don't need true; empty string is valid),
-	# recipient(s), message and socket
+	warn "_ready_to_send() starting\n" if $self->{DEBUG};
+	# need defined sender (don't need true; empty string valid),
+	# recipient(s), defined message, socket and an encoding
 	return (defined($self->{SENDER}) and scalar(@{$self->{RECIPIENTS}}) and
-		($self->{MESSAGE} or $self->{MSGFILE}) and
-		$self->{SOCKET});
+		(defined($self->{MESSAGE}) or $self->{MSGFILE}) and
+		$self->{SOCKET} and $self->{ENCODING});
+}
+
+sub _session_notexpired {
+	my $self = shift;
+	ref($self) or die;
+
+	if (time - $self->{CONNECTTIME} > $self->{SESSIONLIMIT}) {
+		carp "Session has expired";
+		$self->disconnect();	# what about failure?
+		return undef;
+	}
+	return 1;
 }
 
 sub _read_netstring {
 	my $self = shift;
 	ref($self) or die;
 	my $sock = $self->{SOCKET};
-	my $s;
-	read($sock, $s, $self->_getlen()) or die;
-	$self->_getcomma() or die;
+	my($s, $r);
+	warn "_read_netstring() starting\n" if $self->{DEBUG};
+
+	# Returns the number of bytes actually read,
+	# 0 at end of file, or undef if there was an error.
+	defined($r = read($sock, $s, $self->_getlen())) or _badproto();
+	($r and $self->_getcomma()) or _badproto();
 	return $s;
 }
 
@@ -274,9 +396,21 @@ sub _getlen {
 	my $sock = $self->{SOCKET};
 	my $len = 0;
 	my $s = "";
+	my $r;
 	for (;;) {
-		defined(read($sock, $s, 1)) or die;
-		return $len if $s eq ":";
+		warn "length might be $len\n" if $self->{DEBUG};
+
+		# Returns the number of bytes actually read,
+		# 0 at end of file, or undef if there was an error.
+		defined($r = read($sock, $s, 1)) or _badproto();
+		if (!$r) {
+			warn "EOF on socket" if $self->{DEBUG};
+			return 0;
+		}
+		if ($s eq ":") {
+			warn "length is $len\n" if $self->{DEBUG};
+			return $len;
+		}
 		_badproto() if $s !~ /[0-9]/;
 		_badresources() if $len > 200000000;
 		$len = 10 * $len + $s;
@@ -289,23 +423,25 @@ sub _getcomma {
 	ref($self) or die;
 	my $sock = $self->{SOCKET};
 	my $s = "";
-	defined(read($sock, $s, 1)) or die;
-	_badproto() if $s ne ",";
+	my $r;
+	# calling sub should call _badproto() if necessary
+	defined($r = read($sock, $s, 1)) or _badproto();
+	return 0 if (!$r or $s ne ",");
 	return 1;
 }
 
 sub _badproto {
-	confess "Protocol violation";
+	confess "Protocol violation\n";
 }
 
 sub _badresources {
-	confess "Excessive resources requested";
+	confess "Excessive resources requested\n";
 }
 
 sub DESTROY {
 	my $self = shift;
 	ref($self) or die;
-	$self->disconnect();	# don't care about failure
+	$self->disconnect() if $self->{SOCKET};	# don't care about failure
 }
 
 1;
@@ -331,7 +467,7 @@ Net::QMTP - Quick Mail Transfer Protocol (QMTP) client
  $qmtp->encoding('unix');
  $qmtp->message_from_file($filename);
 
- $qmtp->host('server.example.org');
+ $qmtp->server('server.example.org');
  $qmtp->new_envelope();
  $qmtp->new_message();
 
@@ -349,13 +485,31 @@ email by QMTP.
 
 =over 4
 
-=item new(HOST)
+=item new(HOST [, OPTIONS])
 
-The C<new()> constructor creates an new Net::QMTP object and returns a
-reference to it if successful, undef otherwise. C<HOST> is an FQDN or IP
-address of the QMTP server to connect to and it is mandatory. The TCP
-session is established when the object is created but may be brought up
-and down at will by C<disconnect()> and C<reconnect()> methods.
+The new() constructor creates an new Net::QMTP object and returns a
+reference to it if successful, undef otherwise. C<HOST> is the FQDN or
+IP address of the QMTP server to connect to and it is mandatory. By
+default, the TCP session is established when the object is created but
+it may be brought down and up at will by the disconnect() and 
+reconnect() methods.
+
+C<OPTIONS> is an optional list of hash key/value pairs from the
+following list:
+
+B<DeferConnect> - set to 1 to disable automatic connection to the server
+when an object is created by new(). You must explicitly call
+reconnect() when you want to connect.
+
+B<ConnectTimeout> - change the default connection timeout associated
+with the C<IO::Socket> socket we use. Specify this value in seconds.
+
+B<Port> - connect to the specified port on the QMTP server. The
+default is to connect to port 209.
+
+B<Debug> - set to 1 to enable debugging output.
+
+See L<"EXAMPLES">.
 
 =back
 
@@ -368,7 +522,7 @@ and down at will by C<disconnect()> and C<reconnect()> methods.
 Return the envelope sender for this object or set it to the supplied
 C<ADDRESS>. Returns undef if the sender is not yet defined. An empty
 envelope sender is quite valid. If you want this, be sure to call
-C<sender()> with an argument of an empty string.
+sender() with an argument of an empty string.
 
 =item recipient(ADDRESS) recipient()
 
@@ -376,19 +530,22 @@ If supplied, add C<ADDRESS> to the list of envelope recipients. If not,
 return a reference to the current list of recipients. Returns a
 reference to an empty list if recipients have not yet been defined.
 
-=item host(SERVER) host()
+=item server(HOST) server()
 
-If supplied, set C<SERVER> as the QMTP server this object will connect
-to. If not, return the current server.
+If supplied, set C<HOST> as the QMTP server this object will connect
+to. If not, return the current server. You will need to call reconnect()
+to give effect to your change.
 
 =item message(TEXT) message()
 
 If supplied, append C<TEXT> to the message body. If not, return the
 current message body. It is the programmer's responsibility to create a
-valid message including appropriate RFC 2822/822 header lines.
+valid message including appropriate RFC 2822/822 header lines. An empty
+message body is quite valid. If you want this, be sure to call
+message() with an argument of an empty string.
 
 This method cannot be used on a object which has had a message body
-created by the C<message_from_file()> method. Use C<new_message()> to
+created by the message_from_file() method. Use new_message() to
 erase the current message contents.
 
 =item message_from_file(FILE)
@@ -398,7 +555,7 @@ responsibility to create a valid message in C<FILE> including
 appropriate RFC 2822/822 header lines.
 
 This method cannot be used on a object which has had a message body
-created by C<message()>. Use C<new_message()> to erase the current
+created by message(). Use new_message() to erase the current
 message contents.
 
 =item encoding(TYPE) encoding()
@@ -412,18 +569,18 @@ B<dos> - DOS/Windows line ending; lines are delimited by a
 carraige-return line-feed character pair.
 
 The constructor will make a guess at which encoding to use based on
-the value of C<$/>. Call C<encoding()> without an argument to get the
+the value of $/. Call encoding() without an argument to get the
 current line-encoding. It will return a line-feed for C<unix>, a
 carraige-return for C<dos> or undef if the encoding couldn't be set.
 
-Be sure the messages you create with C<message()> and
-C<message_from_file()> have approproiate line-endings.
+Be sure the messages you create with message() and
+message_from_file() have approproiate line-endings.
 
 =item send()
 
-Send the message. It returns a reference to a hash. The hash is keyed by
-recipient address. The value for each key is the response from the QMTP
-server, prepended with one of:
+Send the message. It returns a reference to a hash or undef if the
+operation failed. The hash is keyed by recipient address. The value for
+each key is the response from the QMTP server, prepended with one of:
 
 B<success:> - the message was accepted for delivery
 
@@ -433,6 +590,12 @@ B<failure:> - permanent failure. The message was not accepted and should
 not be tried again
 
 See L<"EXAMPLES">.
+
+You almost certainly want to use reconnect() if send() fails as the
+server will be in an undetermined state and probably won't be able to
+accept a new message over the existing connection. The protocol allows a
+client to close the connection early; the server will discard the data
+already sent without attempting delivery.
 
 =item new_envelope()
 
@@ -447,20 +610,21 @@ Does not affect the envelope.
 =item disconnect()
 
 Close the network connection to the object's server. Returns undef if
-this fails. The object's destructor will call C<disconnect()> to be sure
+this fails. The object's destructor will call disconnect() to be sure
 any open socket is closed cleanly when the object is destroyed.
 
 =item reconnect()
 
-Reestablish a network connection to the object's server. Returns undef
-if the connection could not be established.
+Reestablish a network connection to the object's server, disconnecting
+the current connection if present. Returns undef if the operation could
+not be completed.
 
 =back
 
 =head1 EXAMPLES
 
  use Net::QMTP;
- my $qmtp = Net::QMTP->new('server.example.org') or die;
+ my $qmtp = Net::QMTP->new('server.example.org', Debug => 1) or die;
 
  $qmtp->sender('sender@example.org');
  $qmtp->recipient('joe@example.org');
@@ -477,7 +641,7 @@ if the connection could not be established.
 
 =head1 SEE ALSO
 
-L<qmail-qmtpd(8)>, L<maildirqmtp(1)>.
+L<qmail-qmtpd(8)>, L<maildirqmtp(1)>, L<IO::Socket(3)>.
 
 =head1 NOTES
 
@@ -498,7 +662,7 @@ If, on a Unix system, you say:
  $qmtp->encoding("dos");
 
 with the intention of later supplying a DOS formatted file, don't make
-the mistake of substituting C<message_from_file> with something like:
+the mistake of substituting message_from_file() with something like:
 
  $qmtp->message($lineone . "\n" . $linetwo);
 
@@ -516,23 +680,36 @@ Also known as the TODO list:
 
 =item *
 
-we have no timeouts
+how to report an error message? An error() method?
 
 =item *
 
-we have no debugging output
+a message body can't be created from message() and message_from_file()
 
 =item *
 
-we need an option to constructor to set socket timeout
+socket timeout granularity? we don't handle a timeout well
+read timeout? alarm, SIG{ALRM} w/anon. sub to undef SOCKET?
 
 =item *
 
-how do we reset client/server state if failure occurs during transmission?
+client does NOT need to wait for a server response before sending
+another package (sec. 2) client's responsibility to avoid deadlock;
+if it sends a package before receiving all expected server responses,
+it must continuously watch for those responses (sec. 2)
 
 =item *
 
 we should write more tests
+
+=item *
+
+server is permitted to close the connection at any time. Any response
+not received by the client indicates a temp. failure (sec. 2)
+
+=item *
+
+a QMTP session should take at most 1 hour (sec. 2)
 
 =back
 

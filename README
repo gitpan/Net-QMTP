@@ -1,5 +1,5 @@
 
-Net::QMTP
+Net::QMTP - Quick Mail Transfer Protocol (QMTP) client
 
 Copyright (c) 2003 James Raftery <james@now.ie>. All rights reserved.
 This program is free software; you can redistribute it and/or
@@ -8,7 +8,7 @@ modify it under the same terms as Perl itself.
 Please submit bug reports, patches and comments to the author.
 Latest information at http://romana.now.ie/#net-qmtp
 
-$Id: README,v 1.2 2003/01/28 18:42:37 james Exp $
+$Id: README,v 1.4 2003/01/29 17:42:20 james Exp $
 
 This module is an object interface to the Quick Mail Transfer
 Protocol (QMTP). QMTP is a replacement for the Simple Mail Transfer 
@@ -26,3 +26,5 @@ Net::QMTP installs without any black magic:
 	make test
 	make install
 
+'make test' will output some errors. That's intentional (some of the
+tests verify that things that should cause errors do just that).
