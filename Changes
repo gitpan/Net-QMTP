@@ -1,5 +1,10 @@
 Revision history for Perl extension Net::QMTP.
-$Id: Changes,v 1.6 2003/01/30 19:57:25 james Exp $
+$Id: Changes,v 1.7 2003/06/24 17:26:17 james Exp $
+
+0.05  Tue Jun 24 18:26:04 IST 2003
+	This release of Net::QMTP has changed to move all netstring
+	 handling out to the Text::Netstring module. You require version
+	 0.04 or later of Text::Netstring. 
 
 0.04  Thu Jan 30 19:56:47 GMT 2003
 	Timeout constructor option renamed to ConnectTimeout.

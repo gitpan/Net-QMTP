@@ -8,16 +8,17 @@ modify it under the same terms as Perl itself.
 Please submit bug reports, patches and comments to the author.
 Latest information at http://romana.now.ie/#net-qmtp
 
-$Id: README,v 1.4 2003/01/29 17:42:20 james Exp $
+$Id: README,v 1.6 2003/06/20 13:07:58 james Exp $
 
 This module is an object interface to the Quick Mail Transfer
-Protocol (QMTP). QMTP is a replacement for the Simple Mail Transfer 
+Protocol (QMTP). QMTP is a replacement for the Simple Mail Transfer
 Protocol (SMTP). It offers increased speed, especially over high
 latency links, pipelining, 8-bit data transmission and predeclaration
 of line-ending encoding.
 
-See the Net::QMTP man page that was installed with this module for 
-information on how to use it in your perl programs.
+See the Net::QMTP man page that was installed with this module for
+information on how to use it in your perl programs. You require version
+0.03 or later of the Text::Netstring module.
 
 Net::QMTP installs without any black magic:
 
@@ -26,5 +27,6 @@ Net::QMTP installs without any black magic:
 	make test
 	make install
 
-'make test' will output some errors. That's intentional (some of the
-tests verify that things that should cause errors do just that).
+'make test' will output some errors (``Socket is not defined at t/qmtp.t
+line...''). That's intentional (some of the tests verify that things
+that should cause errors do just that).

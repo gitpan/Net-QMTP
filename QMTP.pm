@@ -5,6 +5,8 @@ use strict;
 
 use IO::Socket;
 use Carp;
+use Text::Netstring qw(netstring_encode netstring_decode netstring_read
+		netstring_verify);
 
 #
 # Copyright (c) 2003 James Raftery <james@now.ie>. All rights reserved.
@@ -13,7 +15,7 @@ use Carp;
 # Please submit bug reports, patches and comments to the author.
 # Latest information at http://romana.now.ie/#net-qmtp
 #
-# $Id: QMTP.pm,v 1.15 2003/01/30 19:53:43 james Exp $
+# $Id: QMTP.pm,v 1.20 2003/06/24 17:26:17 james Exp $
 #
 # This module is an object interface to the Quick Mail Transfer Protocol
 # (QMTP). QMTP is a replacement for the Simple Mail Transfer Protocol
@@ -22,11 +24,12 @@ use Carp;
 # line-ending encoding.
 #
 # See the Net::QMTP man page that was installed with this module for
-# information on how to use the module.
+# information on how to use the module. You require version 0.04 or
+# later of the Text::Netstring module.
 #
 
 use vars qw($VERSION);
-$VERSION = "0.04";
+$VERSION = "0.05";
 
 sub new {
 	my $proto = shift or croak;
@@ -52,7 +55,7 @@ sub new {
 	if ($args{'Debug'}) {
 		$self->{DEBUG} = 1;
 		warn "debugging on; Version: $VERSION; RCS " .
-			qq$Revision: 1.15 $ . "\n";
+			qq$Revision: 1.20 $ . "\n";
 	}
 	$self->{SERVER} = $server or croak "Constructor server failed";
 	warn "server set to '$server'\n" if $self->{DEBUG};
@@ -306,20 +309,22 @@ sub send {
 				"\n" if $self->{DEBUG};
 		$self->_send_file() or return undef;
 	} else {
-		warn "sending message body\n" if $self->{DEBUG};
-		print $sock &_as_netstring($self->{ENCODING} .
+		warn "sending message data\n" if $self->{DEBUG};
+		print $sock netstring_encode($self->{ENCODING} .
 			$self->{MESSAGE}) or return undef;
 	}
 
-	warn "sending envelope sender " .
-		&_as_netstring($self->{SENDER}) . "\n" if $self->{DEBUG};
-	print $sock &_as_netstring($self->{SENDER}) or return undef;
-
-	warn "sending envelope recipient(s) " .
-		&_list_as_netstring($self->{RECIPIENTS})."\n" if $self->{DEBUG};
-	print $sock &_list_as_netstring($self->{RECIPIENTS}) or return undef;
-
 	my($s, %r);
+
+	$s = netstring_encode($self->{SENDER});
+	warn "sending envelope sender $s\n" if $self->{DEBUG};
+	print $sock $s or return undef;
+
+	$s = netstring_encode(scalar netstring_encode($self->{RECIPIENTS}));
+	warn "sending envelope recipient(s) $s\n" if $self->{DEBUG};
+	print $sock $s or return undef;
+	
+	$s = undef;
 	foreach (@{$self->{RECIPIENTS}}) {
 		warn "read response\n" if $self->{DEBUG};
 		$s = $self->_read_netstring();
@@ -365,69 +370,13 @@ sub _read_netstring {
 	my $self = shift;
 	ref($self) or die;
 	my $sock = $self->{SOCKET};
-	my($s, $r);
-	warn "_read_netstring() starting\n" if $self->{DEBUG};
 
-	# Returns the number of bytes actually read,
-	# 0 at end of file, or undef if there was an error.
-	defined($r = read($sock, $s, $self->_getlen())) or _badproto();
-	($r and $self->_getcomma()) or _badproto();
-	return $s;
-}
+	my $s = netstring_read($sock);
 
-sub _as_netstring {
-	my $s = shift || "";
-	return length($s) . ":" . $s . ",";
-}
-
-sub _list_as_netstring {
-	my $listref = shift || [];
-	my $netstring;
-
-	foreach (@{$listref}) {
-		$netstring .= _as_netstring($_);
+	if (defined $s and netstring_verify($s)) {
+		return netstring_decode($s);
 	}
-	return _as_netstring($netstring);
-}
-
-sub _getlen {
-	my $self = shift;
-	ref($self) or die;
-	my $sock = $self->{SOCKET};
-	my $len = 0;
-	my $s = "";
-	my $r;
-	for (;;) {
-		warn "length might be $len\n" if $self->{DEBUG};
-
-		# Returns the number of bytes actually read,
-		# 0 at end of file, or undef if there was an error.
-		defined($r = read($sock, $s, 1)) or _badproto();
-		if (!$r) {
-			warn "EOF on socket" if $self->{DEBUG};
-			return 0;
-		}
-		if ($s eq ":") {
-			warn "length is $len\n" if $self->{DEBUG};
-			return $len;
-		}
-		_badproto() if $s !~ /[0-9]/;
-		_badresources() if $len > 200000000;
-		$len = 10 * $len + $s;
-	}
-	return 0;
-}
-
-sub _getcomma {
-	my $self = shift;
-	ref($self) or die;
-	my $sock = $self->{SOCKET};
-	my $s = "";
-	my $r;
-	# calling sub should call _badproto() if necessary
-	defined($r = read($sock, $s, 1)) or _badproto();
-	return 0 if (!$r or $s ne ",");
-	return 1;
+	return "";
 }
 
 sub _badproto {
@@ -462,7 +411,7 @@ Net::QMTP - Quick Mail Transfer Protocol (QMTP) client
  $qmtp->recipient('foo@example.org');
  $qmtp->recipient('bar@example.org');
 
- $qmtp->message($bodytext);
+ $qmtp->message($datatext);
 
  $qmtp->encoding('unix');
  $qmtp->message_from_file($filename);
@@ -478,7 +427,7 @@ Net::QMTP - Quick Mail Transfer Protocol (QMTP) client
 =head1 DESCRIPTION
 
 This module implements an object orientated interface to a Quick Mail
-Transfer Protocol (QMTP) client which enables a perl program to send
+Transfer Protocol (QMTP) client, which enables a perl program to send
 email by QMTP.
 
 =head2 CONSTRUCTOR
@@ -487,22 +436,22 @@ email by QMTP.
 
 =item new(HOST [, OPTIONS])
 
-The new() constructor creates an new Net::QMTP object and returns a
+The new() constructor creates a new Net::QMTP object and returns a
 reference to it if successful, undef otherwise. C<HOST> is the FQDN or
 IP address of the QMTP server to connect to and it is mandatory. By
 default, the TCP session is established when the object is created but
-it may be brought down and up at will by the disconnect() and 
+it may be brought down and up at will by the disconnect() and
 reconnect() methods.
 
 C<OPTIONS> is an optional list of hash key/value pairs from the
 following list:
 
 B<DeferConnect> - set to 1 to disable automatic connection to the server
-when an object is created by new(). You must explicitly call
-reconnect() when you want to connect.
+when an object is created by new(). If you do this you must explicitly
+call reconnect() when you want to connect.
 
 B<ConnectTimeout> - change the default connection timeout associated
-with the C<IO::Socket> socket we use. Specify this value in seconds.
+with the C<IO::Socket> socket used. Specify this value in seconds.
 
 B<Port> - connect to the specified port on the QMTP server. The
 default is to connect to port 209.
@@ -519,10 +468,10 @@ See L<"EXAMPLES">.
 
 =item sender(ADDRESS) sender()
 
-Return the envelope sender for this object or set it to the supplied
-C<ADDRESS>. Returns undef if the sender is not yet defined. An empty
-envelope sender is quite valid. If you want this, be sure to call
-sender() with an argument of an empty string.
+Return the envelope sender for this object if called with no argument,
+or set it to the supplied C<ADDRESS>. Returns undef if the sender is not
+yet defined. An empty envelope sender is quite valid. If you want this,
+be sure to call sender() with an argument of an empty string.
 
 =item recipient(ADDRESS) recipient()
 
@@ -532,35 +481,36 @@ reference to an empty list if recipients have not yet been defined.
 
 =item server(HOST) server()
 
-If supplied, set C<HOST> as the QMTP server this object will connect
-to. If not, return the current server. You will need to call reconnect()
-to give effect to your change.
+If supplied, set C<HOST> as the QMTP server this object will connect to.
+If not, return the current server or undef if one is not set. You will
+need to call reconnect() to give effect to your change.
 
 =item message(TEXT) message()
 
-If supplied, append C<TEXT> to the message body. If not, return the
-current message body. It is the programmer's responsibility to create a
+If supplied, append C<TEXT> to the message data. If not, return the
+current message data. It is the programmer's responsibility to create a
 valid message including appropriate RFC 2822/822 header lines. An empty
-message body is quite valid. If you want this, be sure to call
-message() with an argument of an empty string.
+message is quite valid. If you want this, be sure to call message() with
+an argument of an empty string.
 
-This method cannot be used on a object which has had a message body
-created by the message_from_file() method. Use new_message() to
-erase the current message contents.
+This method cannot be used on a object which has had message data
+created by the message_from_file() method. Use new_message() to erase
+the current message contents.
 
 =item message_from_file(FILE)
 
-Use the contents of C<FILE> as the message body. It is the programmer's
+Use the contents of C<FILE> as the message data. It is the programmer's
 responsibility to create a valid message in C<FILE> including
 appropriate RFC 2822/822 header lines.
 
-This method cannot be used on a object which has had a message body
-created by message(). Use new_message() to erase the current
-message contents.
+This method cannot be used on a object which has had message data
+created by message(). Use new_message() to erase the current message
+contents.
 
 =item encoding(TYPE) encoding()
 
-Set the line-ending encoding for this object to one of:
+Set the line-ending encoding for this object to the specified C<TYPE>,
+which is one of:
 
 B<unix> - Unix-like line ending; lines are delimited by a line-feed
 character.
@@ -574,7 +524,7 @@ current line-encoding. It will return a line-feed for C<unix>, a
 carraige-return for C<dos> or undef if the encoding couldn't be set.
 
 Be sure the messages you create with message() and
-message_from_file() have approproiate line-endings.
+message_from_file() have appropriate line-endings.
 
 =item send()
 
@@ -591,7 +541,7 @@ not be tried again
 
 See L<"EXAMPLES">.
 
-You almost certainly want to use reconnect() if send() fails as the
+You almost certainly want to use reconnect() if send() fails as the QMTP
 server will be in an undetermined state and probably won't be able to
 accept a new message over the existing connection. The protocol allows a
 client to close the connection early; the server will discard the data
@@ -600,7 +550,7 @@ already sent without attempting delivery.
 =item new_envelope()
 
 Reset the object's envelope information; sender and recipients. Does
-not affect the message body.
+not affect the message data.
 
 =item new_message()
 
@@ -641,16 +591,21 @@ not be completed.
 
 =head1 SEE ALSO
 
-L<qmail-qmtpd(8)>, L<maildirqmtp(1)>, L<IO::Socket(3)>.
+L<qmail-qmtpd(8)>, L<maildirqmtp(1)>, L<IO::Socket(3)>,
+L<Text::Netstring(3)>.
 
 =head1 NOTES
 
 The QMTP protocol is described in http://cr.yp.to/proto/qmtp.txt
 
-QMTP is a replacement for SMTP and, as such, requires a QMTP server in
-addition to this client. The qmail MTA includes a QMTP server;
-qmail-qmtpd. Setting up the server is outside the scope of the module's
-documentation. See http://www.qmail.org/ for more QMTP information.
+QMTP is a replacement for SMTP and, similarly, requires a QMTP server
+for to a QMTP client to communicate with. The qmail MTA includes a QMTP
+server; qmail-qmtpd. Setting up the server is outside the scope of the
+module's documentation. See http://www.qmail.org/ for more QMTP
+information.
+
+This module requires version 0.04 or later of the Text::Netstring
+module.
 
 =head1 CAVEATS
 
@@ -684,7 +639,7 @@ how to report an error message? An error() method?
 
 =item *
 
-a message body can't be created from message() and message_from_file()
+message data can't be created from message() and message_from_file()
 
 =item *
 
