@@ -1,0 +1,23 @@
+
+Net::QMTP
+
+Copyright (c) 2003 James Raftery <james@now.ie>. All rights reserved.
+This program is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself.
+
+Please submit bug reports, patches and comments to the author.
+Latest information at http://romana.now.ie/
+
+$Id: README,v 1.1 2003/01/27 16:57:48 james Exp $
+
+This module is an object interface to the Quick Mail Transfer
+Protocol (QMTP). See the Net::QMTP man page that was installed with
+this module for more information.
+
+Net::QMTP installs without any black magic:
+
+	perl Makefile.PL
+	make
+	make test
+	make install
+

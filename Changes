@@ -1,0 +1,6 @@
+Revision history for Perl extension Net::QMTP.
+$Id: Changes,v 1.2 2003/01/27 15:33:48 james Exp $
+
+0.01  Mon Jan 27 11:31:59 2003
+	- original version; created by h2xs 1.19
+
