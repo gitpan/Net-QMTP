@@ -6,13 +6,18 @@ This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
 
 Please submit bug reports, patches and comments to the author.
-Latest information at http://romana.now.ie/
+Latest information at http://romana.now.ie/#net-qmtp
 
-$Id: README,v 1.1 2003/01/27 16:57:48 james Exp $
+$Id: README,v 1.2 2003/01/28 18:42:37 james Exp $
 
 This module is an object interface to the Quick Mail Transfer
-Protocol (QMTP). See the Net::QMTP man page that was installed with
-this module for more information.
+Protocol (QMTP). QMTP is a replacement for the Simple Mail Transfer 
+Protocol (SMTP). It offers increased speed, especially over high
+latency links, pipelining, 8-bit data transmission and predeclaration
+of line-ending encoding.
+
+See the Net::QMTP man page that was installed with this module for 
+information on how to use it in your perl programs.
 
 Net::QMTP installs without any black magic:
 
