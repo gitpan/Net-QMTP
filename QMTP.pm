@@ -15,7 +15,7 @@ use Text::Netstring qw(netstring_encode netstring_decode netstring_read
 # Please submit bug reports, patches and comments to the author.
 # Latest information at http://romana.now.ie/#net-qmtp
 #
-# $Id: QMTP.pm,v 1.20 2003/06/24 17:26:17 james Exp $
+# $Id: QMTP.pm,v 1.22 2004/11/02 14:56:18 james Exp $
 #
 # This module is an object interface to the Quick Mail Transfer Protocol
 # (QMTP). QMTP is a replacement for the Simple Mail Transfer Protocol
@@ -29,7 +29,7 @@ use Text::Netstring qw(netstring_encode netstring_decode netstring_read
 #
 
 use vars qw($VERSION);
-$VERSION = "0.05";
+$VERSION = "0.06";
 
 sub new {
 	my $proto = shift or croak;
@@ -55,7 +55,7 @@ sub new {
 	if ($args{'Debug'}) {
 		$self->{DEBUG} = 1;
 		warn "debugging on; Version: $VERSION; RCS " .
-			qq$Revision: 1.20 $ . "\n";
+			qq$Revision: 1.22 $ . "\n";
 	}
 	$self->{SERVER} = $server or croak "Constructor server failed";
 	warn "server set to '$server'\n" if $self->{DEBUG};
@@ -110,6 +110,7 @@ sub reconnect {
 				Proto		=> 'tcp') or return undef;
 	}
 
+	binmode($sock);
 	$self->{SOCKET} = $sock;
 	$sock->autoflush();
 	warn "socket opened to " . $sock->peerhost() . "\n" if $self->{DEBUG};
@@ -272,6 +273,7 @@ sub _send_file {
 		return undef;
 	}
 	my $size = (stat(FILE))[7];
+	binmode(FILE);
 	#carp "File '$f' is empty" if $size == 0;
 	if ($size < 0) {
 		carp "File '$f' has negative size";

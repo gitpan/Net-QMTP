@@ -1,5 +1,9 @@
 Revision history for Perl extension Net::QMTP.
-$Id: Changes,v 1.7 2003/06/24 17:26:17 james Exp $
+$Id: Changes,v 1.8 2004/11/02 14:59:33 james Exp $
+
+0.06  Tue 2 Nov 2004 14:56:33 GMT
+	Fix a bug on platforms that distinguish between binary and text
+	 files.
 
 0.05  Tue Jun 24 18:26:04 IST 2003
 	This release of Net::QMTP has changed to move all netstring
